@@ -1,49 +1,45 @@
-Job description
-Reports to: Manager - Climate Action
+ Experience: 3 years to 5 Years
+Category: zINACTIVE - Information Technology
+Main location: Bangalore
+Employment Type: Full Time
 
-Job Overview: To coordinate and execute environment related projects across India (projects including; tree plantation, water conservation, waste management, waste segregation, composting, mangrove conservation and protection, etc.) through collaboration with multiple stakeholders.
+Job Description: - AI-ML Engineer
 
-Job Responsibilities:
+We are seeking a high-impact AI/ML Software Engineer to join our AI engineering team. The ideal candidate brings deep expertise in modern agentic frameworks such as Google ADK, CrewAI, AutoGen, or LangGraph, and hands-on experience in developing Model Context Protocols (MCP). This role is ideal for individuals passionate about engineering through automation, scaling AI architecture, and contributing to the next generation of agent-based systems. You will work closely with our CICD platform tooling and global architecture teams to enhance and productize our agentic SDLC platform.
 
-    To understand the project objectives, deliverables and create the execution plan for the project under the guidance of the Project Manager
-    Create a specific plan for the execution and implementation of the project on a quarterly basis in alignment with the overall project timelines.
-    To develop and nurture strong relations and collaborations with the relevant stakeholders such as; various departments of Municipal Corporation (such as Solid Waste Management, Maintenance department, Garden Department) Maharashtra Maritime board, State Forest Department, Colleges, NSS, NGOs, Community members, Training agency, Environment Consultancies, etc. for successful implementation of the projects.
-    Liaising with stakeholders for successful implementation of the project, actively tracking the project progress on regular basis.
-    To develop suitable IEC materials to complement the project theme i.e. beach conservation, marine pollution and waste management, mangrove conservation, water conservation & plantation to complement the educational activities under the projects.
-    Work actively with colleges, schools, NGOs to mobilize and seek their active participation in the project activities.
-    To follow up and encourage the school children and youth to carry out awareness activities to educate their own peers on beach conservation, marine pollution, waste management and mangrove conservation and protection, environment biodiversity and conservation.
-    To develop/ possess basic knowledge and understanding about the field of environment and be able to provide relevant inputs for the successful execution of the project activities for corporate volunteering and engagement.
-    To document the project activities and outcomes on a regular basis and submit the project status reports to the donor as per the committed timelines.
-    Plan monthly monitoring visits to the project sites with the stakeholders and update donors on the progress of the projects implemented across different locations and also document the visits by creating reports.
-    Create concept notes, Proposals, Budgets, MOUs under the guidance of the Manager
-    Share updates with the social media team for the social media updates and website upgradation the projects.
-    Manage Budget, Grants, and Fund Utilization for projects. Track the payment schedule.
-    Maintain a tracker sheet for project updates.
-    Conduct Nature trails, Wetland cleanups, Mangrove plantations, Beach cleanups, Plantation activities, Awareness sessions on environment related topics.
-    To keep doing continuous research and help with relevant inputs for development, conceptualization, and execution of the projects related to environment.
+Key Responsibilities:
 
+Design, develop, and maintain Kubernetes-based containerized microservices and CICD automation pipelines that support SDLC.
+Build modular agent workflows capable of reasoning, collaborating, and adapting dynamically to context and goals.
+Develop and manage multi-agent systems using frameworks like Google ADK, CrewAI, or AutoGen.
+Build and optimize MCP pipelines, including context injection, memory caching, semantic retrieval, and embedding-based context scoping.
+Develop CLIs and SDKs to support MCP testing and integration.
+Collaborate with cross-functional teams including product, data analytics, and infrastructure to evolve tooling for agent development, prompt evaluation, and telemetry analysis.
+Fine-tune foundation models (e.g., GPT, Claude, Falcon) for enhanced domain-specific performance.
 
-Profile Requisites:
+Required Qualifications:
 
-    The candidate must have Master degree in Horticulture/Agriculture/ Environmental Science or any other relevant subject.
-    Minimum of 2 to 4 years experience in the field of environment with special focus on different methods of tree plantation projects.
-    Ability to interact and connect effectively with a wide range of stakeholders.
-    Efficiency in community outreach and mobilization skills.
-    Knowledge of Afforestation, Miyawaki plantation and Mangrove Restoration will be an added advantage.
-    Efficiency in communication in English and Hindi; both written and oral (efficiency in Marathi will be an added advantage)
-    The candidate must be a team player and should be willing to travel extensively for implementing program activities.
+Bachelors degree in computer science, Engineering, Mathematics, or a related technical field.
+25 years of software engineering experience, with at least 2 years focused on AI/ML or developer platform teams.
+Strong coding skills in Python and Golang, with a track record of writing clean, secure, and scalable code.
+Proven experience in MCP implementation, ensuring efficient, coherent, and context-aware data flow in multi-agent LLM systems.
+Experience with Kubernetes, service mesh technologies (e.g., Istio), and Infrastructure-as-Code (IaC).
+Familiarity with distributed task orchestration and real-time agent execution environments.
 
+Skills:
 
-Remuneration: Subject to relevant qualification, experience & merit; the salary range is INR 5 - 9 LPA
+    Artificial Intelligence
+    Kubernetes
 
-If you think you might be suitable, apply now and well reach out to you soon.
-Role: Project Coordinator
-Industry Type: NGO / Social Services / Industry Associations
-Department: Project & Program Management
+Role: Blockchain Quality Assurance Engineer
+Industry Type: IT Services & Consulting
+Department: Engineering - Software & QA
 Employment Type: Full Time, Permanent
-Role Category: Other Program / Project Management
+Role Category: Quality Assurance and Testing
 Education
 UG: Any Graduate
-PG: Any Postgraduate
+PG: LLM in Law
 Key Skills
-Waste managementEnvironmental scienceHorticultureplantationMaritimeSocial mediaFocusConceptualizationSolid waste managementMonitoring
+Skills highlighted with ‘‘ are preferred keyskills
+kubernetespythongolangartificial intelligencesoftware engineering
+data analyticsfeanatural language processingcaels-dynaansysmachine learningfinite element analysisansys workbenchhypermeshdeep learningmeshingnastranansaabaqusml
