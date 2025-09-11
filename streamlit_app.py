@@ -120,38 +120,60 @@ def generate_questions_and_answers(skills: List[str], difficulty: str, max_items
     return questions, answers
 
 def evaluate_transcript(transcript: List[Dict], candidate_name: str, answer_key: List[str]) -> str:
-    llm = get_llm(model_name="groq/compound", temperature=0)
+    def _truncate(text: str, max_chars: int = 700) -> str:
+        if not text:
+            return ""
+        return text if len(text) <= max_chars else text[: max_chars - 3] + "..."
+
+    # Build compact prompt to reduce token usage
+    compact_lines = []
+    for i, item in enumerate(transcript):
+        q = _truncate(item.get('question', ''), 240)
+        a = _truncate(item.get('answer', ''), 600)
+        compact_lines.append(f"Q{i+1}: {q}\nA{i+1}: {a}")
+    transcript_blob = "\n\n".join(compact_lines)
+    answer_blob = "\n".join([f"A{i+1}*: {_truncate(ans, 600)}" for i, ans in enumerate(answer_key)])
+
     prompt_text = """
 You are an expert technical interviewer providing feedback for candidate {candidate_name}.
-Evaluate the candidate's responses from the interview transcript below.
-Provide a concise overall summary and a final score out of 10.
-Then, for each question, show:
-1. The Question
-2. The Ideal Answer (from answer key)
-3. Candidate Answer Summary (1-2 sentences)
-4. Score (0-10) and 1 bullet of actionable feedback.
-Return clean Markdown.
+Evaluate the candidate concisely.
+Output:
+- Overall Summary (2-4 sentences) + Final Score (/10)
+- For each question i: show Question, Ideal Answer (short), Candidate Answer Summary (1 sentence), Score (0-10), Feedback (1 bullet).
+Use Markdown.
 
-Transcript:
+Transcript (condensed):
 {transcript_text}
-Answer Key:
+
+Ideal Answers (condensed):
 {answer_key_text}
 """
-    prompt = ChatPromptTemplate.from_template(prompt_text)
-    chain = prompt | llm | StrOutputParser()
 
-    formatted_transcript = []
-    for i, item in enumerate(transcript):
-        formatted_transcript.append(
-            f"Question {i+1}: {item['question']}\nCandidate Answer: {item['answer']}\n"
-        )
-    transcript_blob = "\n".join(formatted_transcript)
-    answer_blob = "\n".join([f"Q{i+1}: {a}" for i, a in enumerate(answer_key)])
-    return chain.invoke({
-        "candidate_name": candidate_name,
-        "transcript_text": transcript_blob,
-        "answer_key_text": answer_blob
-    })
+    models_to_try = [
+        "groq/compound",            # primary (as configured elsewhere)
+        "qwen/qwen3-32b",           # fallback 1
+        "llama-3.1-8b-instant"      # fallback 2 (lighter)
+    ]
+
+    last_err = None
+    for model_name in models_to_try:
+        try:
+            llm = get_llm(model_name=model_name, temperature=0)
+            chain = ChatPromptTemplate.from_template(prompt_text) | llm | StrOutputParser()
+            return chain.invoke({
+                "candidate_name": candidate_name,
+                "transcript_text": transcript_blob,
+                "answer_key_text": answer_blob
+            })
+        except Exception as e:
+            last_err = e
+            # If rate limit error, continue to next model
+            if "rate limit" in str(e).lower() or "429" in str(e):
+                continue
+            # Other errors: try next model as well
+            continue
+    # If all models failed, raise the last error up to caller
+    raise last_err if last_err else RuntimeError("Evaluation failed with all models")
 
 # ================= Utility ======================
 TOTAL_TIME_SECONDS = 45 * 60  # 45 min

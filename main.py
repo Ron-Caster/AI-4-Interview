@@ -127,26 +127,44 @@ def generate_questions(skills: List[str], difficulty: str, max_questions: int = 
     
 
 def evaluate_transcript(transcript: List[Dict], candidate_name: str) -> str:
-    llm = ChatGroq(temperature=0, groq_api_key=settings.GROQ_API_KEY, model_name="groq/compound")
-    prompt_text = f"""
-    You are an expert technical interviewer providing feedback for candidate **{candidate_name}**. 
-    Evaluate the candidate's responses from the interview transcript below.
-    Provide a concise overall summary and a final score out of 10.
-    Then, for each question, provide a score and 1-2 bullet points of constructive feedback.
-    Format your response cleanly in Markdown.
+    def _truncate(text: str, max_chars: int = 700) -> str:
+        if not text:
+            return ""
+        return text if len(text) <= max_chars else text[: max_chars - 3] + "..."
 
-    Transcript:
-    {{transcript_text}}
-    """
-    prompt = ChatPromptTemplate.from_template(prompt_text)
-    chain = prompt | llm | StrOutputParser()
-
-    formatted_transcript = ""
+    compact_lines = []
     for i, item in enumerate(transcript):
-        formatted_transcript += f"Question {i+1}: {item['question']}\nAnswer {i+1}: {item['answer']}\n\n"
+        q = _truncate(item.get('question', ''), 240)
+        a = _truncate(item.get('answer', ''), 600)
+        compact_lines.append(f"Q{i+1}: {q}\nA{i+1}: {a}")
+    transcript_blob = "\n\n".join(compact_lines)
 
-    report = chain.invoke({"transcript_text": formatted_transcript})
-    return report
+    prompt_text = f"""
+You are an expert technical interviewer providing feedback for candidate **{{candidate_name}}**.
+Provide a concise overall summary and a final score out of 10.
+Then for each question provide a score and 1 bullet of constructive feedback.
+Return clean Markdown.
+
+Transcript (condensed):
+{{transcript_text}}
+"""
+    models_to_try = [
+        "groq/compound",
+        "qwen/qwen3-32b",
+        "llama-3.1-8b-instant"
+    ]
+    last_err = None
+    for model_name in models_to_try:
+        try:
+            llm = ChatGroq(temperature=0, groq_api_key=settings.GROQ_API_KEY, model_name=model_name)
+            chain = ChatPromptTemplate.from_template(prompt_text) | llm | StrOutputParser()
+            return chain.invoke({"transcript_text": transcript_blob, "candidate_name": candidate_name})
+        except Exception as e:
+            last_err = e
+            if "rate limit" in str(e).lower() or "429" in str(e):
+                continue
+            continue
+    raise last_err if last_err else RuntimeError("Evaluation failed with all models")
 
 def infer_difficulty(jd_text: str) -> str:
     jd_lower = jd_text.lower()
