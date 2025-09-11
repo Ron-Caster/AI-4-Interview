@@ -11,10 +11,8 @@ from pydantic_settings import BaseSettings
 from dotenv import load_dotenv
 from rich.console import Console
 from rich.panel import Panel
-from rich.live import Live
-from rich.align import Align
 
-from sqlalchemy import create_engine, Column, String, Text, DateTime, JSON, inspect, text
+from sqlalchemy import create_engine, Column, String, Text, DateTime, JSON
 from sqlalchemy.orm import sessionmaker, declarative_base
 
 from langchain_core.prompts import ChatPromptTemplate
@@ -29,7 +27,7 @@ console = Console()
 # === CONFIGURATION AND SETUP =================================================
 
 class Settings(BaseSettings):
-    GROQ_API_KEY: str ="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"
+    GROQ_API_KEY: str
     DATABASE_URL: str = "sqlite:///./interviews.db"
 
 settings = Settings()
@@ -41,34 +39,16 @@ Base = declarative_base()
 class InterviewSession(Base):
     __tablename__ = "interview_sessions"
     session_id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    candidate_name = Column(String, nullable=False)   # NEW FIELD
     status = Column(String, nullable=False, default='PENDING')
     job_description = Column(Text, nullable=False)
     difficulty = Column(String, nullable=False)
     questions_json = Column(JSON, nullable=True)
-    # NEW COLUMN (added after initial deployment) stores ideal answers
-    answers_key_json = Column(JSON, nullable=True)
     transcript_json = Column(JSON, nullable=True, default=[])
     report_text = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-
 Base.metadata.create_all(bind=engine)
-
-# --- Lightweight migration to add missing columns if DB was created before new fields ---
-def run_light_migrations():
-    try:
-        insp = inspect(engine)
-        cols = [c['name'] for c in insp.get_columns('interview_sessions')]
-        if 'answers_key_json' not in cols:
-            # SQLite: JSON will be treated as TEXT if native JSON not supported
-            with engine.begin() as conn:
-                conn.execute(text('ALTER TABLE interview_sessions ADD COLUMN answers_key_json JSON'))
-    except Exception as mig_err:
-        console.print(f"[bold yellow]Migration warning:[/bold yellow] {mig_err}")
-
-run_light_migrations()
 
 # === Pydantic Schemas ========================================================
 
@@ -105,16 +85,9 @@ def parse_job_description(job_description: str) -> List[str]:
     return scored_skills[:8]
 
 def generate_questions(skills: List[str], difficulty: str, max_questions: int = 8) -> List[str]:
-    difficulty_map = {
-        "basic": "Beginner-level",
-        "intermediate": "Intermediate-level",
-        "difficult": "Advanced-level"
-    }
-    difficulty_label = difficulty_map.get(difficulty.lower(), "Intermediate-level")
-
     llm = ChatGroq(temperature=0.4, groq_api_key=settings.GROQ_API_KEY, model_name="groq/compound")
     prompt = ChatPromptTemplate.from_messages([
-        ("system", f"You are a technical hiring manager. Generate one concise, practical, {difficulty_label} interview question for the following skill. Only provide the question text itself."),
+        ("system", "You are a technical hiring manager. Generate one concise, practical, {difficulty} level interview question for the following skill. Only provide the question text itself."),
         ("human", "Skill: {skill}")
     ])
 
@@ -124,19 +97,17 @@ def generate_questions(skills: List[str], difficulty: str, max_questions: int = 
         question = chain.invoke({"difficulty": difficulty, "skill": skill})
         questions.append(question.strip())
     return questions
-    
 
-def evaluate_transcript(transcript: List[Dict], candidate_name: str) -> str:
+def evaluate_transcript(transcript: List[Dict]) -> str:
     llm = ChatGroq(temperature=0, groq_api_key=settings.GROQ_API_KEY, model_name="groq/compound")
-    prompt_text = f"""
-    You are an expert technical interviewer providing feedback for candidate **{candidate_name}**. 
-    Evaluate the candidate's responses from the interview transcript below.
+    prompt_text = """
+    You are an expert technical interviewer providing feedback. Evaluate the candidate's responses from the interview transcript below.
     Provide a concise overall summary and a final score out of 10.
     Then, for each question, provide a score and 1-2 bullet points of constructive feedback.
     Format your response cleanly in Markdown.
 
     Transcript:
-    {{transcript_text}}
+    {transcript_text}
     """
     prompt = ChatPromptTemplate.from_template(prompt_text)
     chain = prompt | llm | StrOutputParser()
@@ -161,11 +132,7 @@ def infer_difficulty(jd_text: str) -> str:
 def start_interview():
     jd_file_path = "jd.txt"
 
-    console.print(Panel("Welcome Candidate!", style="bold magenta"))
-    candidate_name = console.input("[bold blue]Enter your full name:> [/bold blue]").strip()
-    if not candidate_name:
-        console.print("[bold red]Name cannot be empty. Using 'Unknown Candidate'.[/bold red]")
-        candidate_name = "Unknown Candidate"
+    console.print(Panel("AI Mock Interviewer", style="bold blue"))
 
     if not os.path.exists(jd_file_path):
         console.print(f"[bold red]Error:[/bold red] The required file '{jd_file_path}' was not found.")
@@ -175,17 +142,10 @@ def start_interview():
     with open(jd_file_path, 'r') as f:
         jd_text = f.read()
 
-    # difficulty_level = infer_difficulty(jd_text)
-    console.print(Panel("Select difficulty level: [bold green]basic[/bold green], [bold yellow]intermediate[/bold yellow], [bold red]difficult[/bold red]", style="cyan"))
-    difficulty_level = console.input("[bold blue]Enter difficulty level:> [/bold blue]").strip().lower()
-
-    if difficulty_level not in {"basic", "intermediate", "difficult"}:
-        console.print("[bold red]Invalid choice! Defaulting to 'intermediate'.[/bold red]")
-        difficulty_level = "intermediate"
-
+    difficulty_level = infer_difficulty(jd_text)
     db = SessionLocal()
     try:
-        session = InterviewSession(candidate_name=candidate_name, job_description=jd_text, difficulty=difficulty_level)
+        session = InterviewSession(job_description=jd_text, difficulty=difficulty_level)
         db.add(session)
         db.commit()
         db.refresh(session)
@@ -207,30 +167,10 @@ def start_interview():
         console.print("[bold green]✓[/bold green] Questions are ready. The interview will now begin.")
         time.sleep(1)
 
-        time_limit = 45 * 60  # 45 minutes in seconds
-        start_time = time.time()
-
         question_count = 1
         transcript = []
-
         for question in session.questions_json:
-            elapsed = time.time() - start_time
-            remaining = int(time_limit - elapsed)
-
-            if remaining <= 0:
-                console.print("[bold red]⏰ Time is up! The assessment has ended.[/bold red]")
-                break
-
-            # Format as MM:SS
-            minutes, seconds = divmod(remaining, 60)
-            time_display = f"{minutes:02d}:{seconds:02d}"
-
-            console.print(Panel(
-                f"Question {question_count}/{len(session.questions_json)} (⏳ Time left: {time_display})\n\n{question}",
-                title="Question",
-                border_style="cyan"
-            ))
-
+            console.print(Panel(f"Question {question_count}/{len(session.questions_json)}:\n\n{question}", title="Question", border_style="cyan"))
             answer = console.input("[bold yellow]Your Answer:> [/bold yellow]")
 
             transcript.append({"question": question, "answer": answer})
@@ -240,12 +180,10 @@ def start_interview():
             question_count += 1
             console.print("-" * 50)
 
-
-        # ✅ Always go to evaluation whether time ends or all questions answered
-        console.print("\n[bold blue]Interview ended. Evaluating your responses...[/bold blue]")
+        console.print("\n[bold blue]All questions have been answered. Evaluating your responses...[/bold blue]")
         with console.status("[bold yellow]Generating your final report...[/bold yellow]", spinner="dots"):
             try:
-                report = evaluate_transcript(session.transcript_json, session.candidate_name)
+                report = evaluate_transcript(session.transcript_json)
                 session.report_text = report
                 session.status = 'COMPLETED'
                 db.commit()
@@ -254,7 +192,6 @@ def start_interview():
                 console.print(f"\n[bold red]Error:[/bold red] Failed to generate evaluation: {e}")
                 session.status = 'FAILED'
                 db.commit()
-
     finally:
         db.close()
 

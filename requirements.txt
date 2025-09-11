@@ -9,3 +9,4 @@ python-dotenv
 click
 rich
 requests
+streamlit
