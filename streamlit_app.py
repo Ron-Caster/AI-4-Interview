@@ -84,9 +84,9 @@ def parse_job_description(job_description: str) -> List[str]:
     filtered_skills = [s for s in result_object.skills if s.lower() not in blacklist]
     jd_lower = job_description.lower()
     scored_skills = sorted(filtered_skills, key=lambda s: jd_lower.count(s.lower()), reverse=True)
-    return scored_skills[:8]
+    return scored_skills[:10]
 
-def generate_questions_and_answers(skills: List[str], difficulty: str, max_items: int = 8):
+def generate_questions_and_answers(skills: List[str], difficulty: str, max_items: int = 10):
     difficulty_map = {
         "basic": "Beginner-level",
         "intermediate": "Intermediate-level",
@@ -189,9 +189,6 @@ st.title("🤖 AI Technical Interview")
 # Sidebar config
 with st.sidebar:
     st.header("Session")
-    api_key_input = st.text_input("GROQ API Key", type="password", help="Overrides environment variable.")
-    if api_key_input:
-        settings.GROQ_API_KEY = api_key_input
     jd_file = st.file_uploader("Upload Job Description (jd.txt)", type=["txt"])    
     difficulty = st.selectbox("Difficulty", ["basic", "intermediate", "difficult"], index=1)
     candidate_name = st.text_input("Candidate Full Name")
@@ -215,6 +212,8 @@ if "report" not in st.session_state:
     st.session_state.report = None
 if "debug_logs" not in st.session_state:
     st.session_state.debug_logs = []
+if "candidate_name" not in st.session_state:
+    st.session_state.candidate_name = ""
 
 def log(msg: str):
     ts = time.strftime('%H:%M:%S')
@@ -298,6 +297,7 @@ if start_btn and not st.session_state.session_id:
             st.session_state.questions = questions
             st.session_state.answers_key = answers_key
             st.session_state.start_time = time.time()
+            st.session_state.candidate_name = candidate_name
             st.success(f"Session created: {session.session_id}")
             log("Interview session initialized successfully")
         except Exception as e:
@@ -335,51 +335,80 @@ if st.session_state.session_id and not st.session_state.completed:
         st.subheader(f"Question {idx+1}/{len(st.session_state.questions)}")
         st.info(st.session_state.questions[idx])
 
-        # Autosave answer in session_state using stable key
+        # Question form ensures atomic capture of latest text on submit
+        form_key = f"qa_form_{idx}"
         answer_key = f"answer_{idx}"
-        if answer_key not in st.session_state:
-            # Preload from responses if returning to a previous question
-            if idx < len(st.session_state.responses):
-                st.session_state[answer_key] = st.session_state.responses[idx]["answer"]
-            else:
-                st.session_state[answer_key] = ""
-        st.text_area("Your Answer", key=answer_key, height=180, placeholder="Type your answer here. It is autosaved.")
+        with st.form(key=form_key, clear_on_submit=False):
+            # Initialize answer state if needed
+            if answer_key not in st.session_state:
+                if idx < len(st.session_state.responses):
+                    st.session_state[answer_key] = st.session_state.responses[idx]["answer"]
+                else:
+                    st.session_state[answer_key] = ""
 
-        col1, col2, col3 = st.columns([1,1,1])
-        with col1:
-            if st.button("Save & Next", disabled=remaining==0):
-                current_answer = st.session_state.get(answer_key, "")
-                if idx < len(st.session_state.responses):
-                    st.session_state.responses[idx]["answer"] = current_answer
-                else:
-                    st.session_state.responses.append({"question": st.session_state.questions[idx], "answer": current_answer})
-                st.session_state.current_index += 1
-        with col2:
-            if st.button("Save (Stay)"):
-                current_answer = st.session_state.get(answer_key, "")
-                if idx < len(st.session_state.responses):
-                    st.session_state.responses[idx]["answer"] = current_answer
-                else:
-                    st.session_state.responses.append({"question": st.session_state.questions[idx], "answer": current_answer})
-                st.success("Saved")
-        with col3:
-            if st.button("Finish Now"):
-                current_answer = st.session_state.get(answer_key, "")
-                if idx < len(st.session_state.responses):
-                    st.session_state.responses[idx]["answer"] = current_answer
-                else:
-                    st.session_state.responses.append({"question": st.session_state.questions[idx], "answer": current_answer})
-                st.session_state.completed = True
+            st.text_area(
+                "Your Answer",
+                key=answer_key,
+                height=220,
+                placeholder="Type your answer here."
+            )
+
+            c1, c2, c3 = st.columns([1,1,1])
+            with c1:
+                save_next = st.form_submit_button("Save & Next", disabled=remaining==0, use_container_width=True)
+            with c2:
+                save_only = st.form_submit_button("Save (Stay)", use_container_width=True)
+            with c3:
+                finish_now = st.form_submit_button("Finish Now", use_container_width=True)
+
+        # Handle form outcomes after rerun
+        def _persist_current_answer():
+            current_answer = st.session_state.get(answer_key, "")
+            if idx < len(st.session_state.responses):
+                st.session_state.responses[idx]["answer"] = current_answer
+            else:
+                st.session_state.responses.append({
+                    "question": st.session_state.questions[idx],
+                    "answer": current_answer
+                })
+
+        if save_only:
+            _persist_current_answer()
+            st.success("Saved")
+        if save_next:
+            _persist_current_answer()
+            st.session_state.current_index += 1
+            st.rerun()
+        if finish_now:
+            _persist_current_answer()
+            st.session_state.completed = True
+            st.rerun()
     else:
         st.success("All questions answered. Click 'Generate Report' below to evaluate.")
         if st.button("Generate Report"):
+            # Ensure last answer is saved if user reached end without pressing Save
+            last_idx = len(st.session_state.questions) - 1
+            if last_idx >= 0:
+                last_key = f"answer_{last_idx}"
+                if last_key in st.session_state:
+                    if last_idx < len(st.session_state.responses):
+                        st.session_state.responses[last_idx]["answer"] = st.session_state[last_key]
+                    else:
+                        st.session_state.responses.append({
+                            "question": st.session_state.questions[last_idx],
+                            "answer": st.session_state[last_key]
+                        })
             st.session_state.completed = True
 
 # Evaluation
 if st.session_state.completed and st.session_state.report is None:
     with st.spinner("Evaluating responses and generating feedback + answer key..."):
         try:
-            report = evaluate_transcript(st.session_state.responses, candidate_name or "Candidate", st.session_state.answers_key)
+            report = evaluate_transcript(
+                st.session_state.responses,
+                (st.session_state.candidate_name or candidate_name or "Candidate"),
+                st.session_state.answers_key
+            )
             st.session_state.report = report
             # Persist transcript + report
             db = SessionLocal()
@@ -397,6 +426,14 @@ if st.session_state.completed and st.session_state.report is None:
 
 if st.session_state.report:
     st.markdown("## 📊 Evaluation Report")
+    # Export button to download report as .txt
+    export_name = f"evaluation_report_{(st.session_state.candidate_name or 'candidate').replace(' ', '_')}.txt"
+    st.download_button(
+        label="Download Report (.txt)",
+        data=st.session_state.report,
+        file_name=export_name,
+        mime="text/plain"
+    )
     st.markdown(st.session_state.report)
     with st.expander("Show Answer Key"):
         for i, (q, a) in enumerate(zip(st.session_state.questions, st.session_state.answers_key), start=1):
@@ -409,9 +446,18 @@ if st.session_state.report:
             st.write("No logs yet.")
 
     if st.button("Start New Interview"):
-        for key in ["session_id", "start_time", "questions", "answers_key", "responses", "current_index", "completed", "report"]:
-            st.session_state[key] = None if key in ["session_id", "start_time", "report"] else [] if key in ["questions", "answers_key", "responses"] else 0 if key=="current_index" else False
-        st.experimental_rerun()
+        for key in ["session_id", "start_time", "questions", "answers_key", "responses", "current_index", "completed", "report", "candidate_name"]:
+            if key in ["session_id", "start_time", "report"]:
+                st.session_state[key] = None
+            elif key in ["questions", "answers_key", "responses"]:
+                st.session_state[key] = []
+            elif key == "current_index":
+                st.session_state[key] = 0
+            elif key == "candidate_name":
+                st.session_state[key] = ""
+            else:
+                st.session_state[key] = False
+    st.rerun()
 
 # Auto-refresh timer every second during active interview
 # (Removed aggressive immediate rerun; using st_autorefresh instead)
