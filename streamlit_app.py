@@ -130,22 +130,55 @@ def evaluate_transcript(transcript: List[Dict], candidate_name: str, answer_key:
     for i, item in enumerate(transcript):
         q = _truncate(item.get('question', ''), 240)
         a = _truncate(item.get('answer', ''), 600)
-        compact_lines.append(f"Q{i+1}: {q}\nA{i+1}: {a}")
+        
+        # Build comprehensive detection info
+        total_time = item.get('total_time', item.get('time_taken', 'N/A'))
+        copy_score = item.get('copy_paste_score', 0)
+        suspicion = item.get('copy_paste_suspicion', 'UNKNOWN')
+        detection_reasons = item.get('detection_reasons', [])
+        
+        if isinstance(total_time, (int, float)):
+            time_str = f" (Time: {total_time:.1f}s | Copy-Paste Score: {copy_score}/100 | Suspicion: {suspicion})"
+            if detection_reasons:
+                time_str += f"\nDetection Flags: {'; '.join(detection_reasons[:2])}"
+        else:
+            time_str = " (Time: N/A | Suspicion: UNKNOWN)"
+            
+        compact_lines.append(f"Q{i+1}: {q}{time_str}\nA{i+1}: {a}")
     transcript_blob = "\n\n".join(compact_lines)
     answer_blob = "\n".join([f"A{i+1}*: {_truncate(ans, 600)}" for i, ans in enumerate(answer_key)])
 
     prompt_text = """
 You are an expert technical interviewer providing feedback for candidate {candidate_name}.
-Evaluate the candidate concisely.
-Output:
-- Overall Summary (2-4 sentences) + Final Score (/10)
-- For each question i: show Question, Ideal Answer (short), Candidate Answer Summary (1 sentence), Score (0-10), Feedback (1 bullet).
-Use Markdown.
+Evaluate the candidate and pay CLOSE ATTENTION to copy-paste detection scores and flags.
 
-Transcript (condensed):
+COPY-PASTE DETECTION SYSTEM:
+Each answer has been analyzed with a comprehensive detection algorithm that checks:
+- Completion speed vs answer complexity
+- Character-per-second typing rates  
+- Formatting patterns typical of prepared text
+- Technical terminology density vs completion time
+- Answer structure and completeness patterns
+
+SUSPICION LEVELS:
+- HIGH (Score 70-100): Very likely copy-paste - flag this prominently
+- MEDIUM (Score 40-69): Suspicious patterns - investigate further
+- LOW (Score 0-39): Appears to be genuine typing
+
+IMPORTANT: If ANY answer shows HIGH suspicion, mention this prominently in your overall summary.
+For MEDIUM/HIGH suspicion answers, be more critical of the content quality.
+
+Output Format:
+- **Overall Summary** (2-4 sentences) + **Final Score (/10)**
+- **Copy-Paste Assessment**: Overall suspicion level across all answers
+- For each question: **Q#**, **Time & Detection**, **Ideal Answer**, **Candidate Summary**, **Score (0-10)**, **Authenticity**, **Feedback**
+
+Use Markdown formatting.
+
+Transcript (with detection analysis):
 {transcript_text}
 
-Ideal Answers (condensed):
+Ideal Answers:
 {answer_key_text}
 """
 
@@ -212,8 +245,16 @@ if "report" not in st.session_state:
     st.session_state.report = None
 if "debug_logs" not in st.session_state:
     st.session_state.debug_logs = []
-if "candidate_name" not in st.session_state:
-    st.session_state.candidate_name = ""
+if "question_start_time" not in st.session_state:
+    st.session_state.question_start_time = None
+if "typing_patterns" not in st.session_state:
+    st.session_state.typing_patterns = []
+if "first_keystroke_time" not in st.session_state:
+    st.session_state.first_keystroke_time = None
+if "paste_events" not in st.session_state:
+    st.session_state.paste_events = []
+if "keystroke_intervals" not in st.session_state:
+    st.session_state.keystroke_intervals = []
 
 def log(msg: str):
     ts = time.strftime('%H:%M:%S')
@@ -238,15 +279,17 @@ if start_btn and not st.session_state.session_id:
                 skills = parse_job_description(jd_text)
             log(f"Extracted skills: {skills}")
 
+            skill_slice = skills[:15] if skills else []
+            if len(skill_slice) < 15:
+                default_skills = ["problem solving", "system design", "python basics", "data structures", "algorithms", "software engineering", "database design", "web development", "cloud computing", "security", "testing", "version control", "api design", "scalability"]
+                for i in range(15 - len(skill_slice)):
+                    skill_slice.append(default_skills[i % len(default_skills)])
+
             st.write("Generating questions and ideal answers:")
             progress = st.progress(0)
             questions = []
             answers_key = []
-            skill_slice = skills[:8] if skills else []
-            total = max(1, len(skill_slice))
-            if not skill_slice:
-                log("No skills extracted; using generic placeholders")
-                skill_slice = ["problem solving", "system design", "python basics"]
+            total = 15
 
             # Build chains once outside loop
             try:
@@ -297,6 +340,7 @@ if start_btn and not st.session_state.session_id:
             st.session_state.questions = questions
             st.session_state.answers_key = answers_key
             st.session_state.start_time = time.time()
+            st.session_state.question_start_time = time.time()
             st.session_state.candidate_name = candidate_name
             st.success(f"Session created: {session.session_id}")
             log("Interview session initialized successfully")
@@ -352,6 +396,92 @@ if st.session_state.session_id and not st.session_state.completed:
                 height=220,
                 placeholder="Type your answer here."
             )
+            
+            # Advanced copy-paste detection JavaScript
+            components.html(
+                f"""
+                <div id="detection-{idx}" style="display:none;"></div>
+                <script>
+                let questionIndex = {idx};
+                let questionStartTime = {st.session_state.question_start_time};
+                let firstKeystroke = false;
+                let keystrokeData = [];
+                let pasteDetected = false;
+                let largeInputDetected = false;
+                
+                function detectCopyPaste() {{
+                    const textarea = findTextarea();
+                    if (!textarea) return;
+                    
+                    let lastLength = 0;
+                    let lastTime = Date.now();
+                    
+                    // Detect paste events
+                    textarea.addEventListener('paste', function(e) {{
+                        pasteDetected = true;
+                        const pasteTime = Date.now() / 1000;
+                        const thinkTime = questionStartTime ? pasteTime - questionStartTime : 0;
+                        sessionStorage.setItem('paste_detected_{idx}', 'true');
+                        sessionStorage.setItem('paste_think_time_{idx}', thinkTime.toString());
+                        console.log('PASTE DETECTED at question {idx}');
+                    }});
+                    
+                    // Monitor typing patterns
+                    textarea.addEventListener('input', function(e) {{
+                        const now = Date.now();
+                        const currentLength = textarea.value.length;
+                        const lengthDelta = currentLength - lastLength;
+                        const timeDelta = now - lastTime;
+                        
+                        if (!firstKeystroke && questionStartTime) {{
+                            const thinkingTime = now/1000 - questionStartTime;
+                            sessionStorage.setItem('thinking_time_{idx}', thinkingTime.toString());
+                            firstKeystroke = true;
+                        }}
+                        
+                        // Detect large sudden text additions (likely paste)
+                        if (lengthDelta > 20 && timeDelta < 100) {{
+                            largeInputDetected = true;
+                            sessionStorage.setItem('large_input_{idx}', 'true');
+                        }}
+                        
+                        // Track keystroke intervals for rhythm analysis
+                        if (lengthDelta > 0 && timeDelta < 5000) {{
+                            keystrokeData.push({{
+                                'delta': lengthDelta,
+                                'time': timeDelta,
+                                'wpm': (lengthDelta / 5) / (timeDelta / 60000)
+                            }});
+                        }}
+                        
+                        lastLength = currentLength;
+                        lastTime = now;
+                        
+                        // Store keystroke data
+                        sessionStorage.setItem('keystroke_data_{idx}', JSON.stringify(keystrokeData));
+                    }});
+                    
+                    // Monitor focus changes (switching to other apps)
+                    let focusLost = false;
+                    textarea.addEventListener('blur', function() {{
+                        focusLost = true;
+                        sessionStorage.setItem('focus_lost_{idx}', 'true');
+                    }});
+                }}
+                
+                function findTextarea() {{
+                    const textareas = parent.document.querySelectorAll('textarea');
+                    for (let ta of textareas) {{
+                        if (ta.placeholder === 'Type your answer here.') return ta;
+                    }}
+                    return null;
+                }}
+                
+                setTimeout(detectCopyPaste, 100);
+                </script>
+                """,
+                height=1
+            )
 
             c1, c2, c3 = st.columns([1,1,1])
             with c1:
@@ -362,25 +492,103 @@ if st.session_state.session_id and not st.session_state.completed:
                 finish_now = st.form_submit_button("Finish Now", use_container_width=True)
 
         # Handle form outcomes after rerun
-        def _persist_current_answer():
+        def _persist_current_answer(time_taken=None):
             current_answer = st.session_state.get(answer_key, "")
+            response = {
+                "question": st.session_state.questions[idx],
+                "answer": current_answer
+            }
+            
+            if time_taken is not None:
+                response["total_time"] = time_taken
+                
+                # AGGRESSIVE COPY-PASTE DETECTION
+                copy_paste_score = 0
+                detection_reasons = []
+                
+                # 1. Check for extremely fast completion
+                if time_taken < 15 and len(current_answer.strip()) > 100:
+                    copy_paste_score += 40
+                    detection_reasons.append("Extremely fast completion for long answer")
+                
+                # 2. Check character-per-second ratio
+                if current_answer and time_taken > 0:
+                    chars_per_sec = len(current_answer) / time_taken
+                    if chars_per_sec > 8:  # Very fast typing (>8 chars/sec = ~96 WPM)
+                        copy_paste_score += 30
+                        detection_reasons.append(f"Suspiciously fast typing: {chars_per_sec:.1f} chars/sec")
+                
+                # 3. Check for perfect formatting patterns
+                if current_answer:
+                    formatting_indicators = [
+                        '\n-' in current_answer,  # Bullet points
+                        '\n1.' in current_answer,  # Numbered lists
+                        current_answer.count('\n') > 3,  # Multiple paragraphs
+                        len([w for w in current_answer.split() if len(w) > 8]) > len(current_answer.split()) * 0.3  # Complex words
+                    ]
+                    if sum(formatting_indicators) >= 2:
+                        copy_paste_score += 25
+                        detection_reasons.append("Complex formatting unlikely for live typing")
+                
+                # 4. Check for minimal thinking time with complex answer
+                thinking_time = min(time_taken * 0.15, 10)  # Estimate
+                if thinking_time < 5 and len(current_answer.split()) > 30:
+                    copy_paste_score += 35
+                    detection_reasons.append("Minimal thinking time for complex answer")
+                
+                # 5. Check answer structure and completeness
+                if current_answer:
+                    sentences = current_answer.split('. ')
+                    if len(sentences) > 3 and all(len(s.split()) > 5 for s in sentences[:3]):
+                        if time_taken < 30:
+                            copy_paste_score += 20
+                            detection_reasons.append("Well-structured answer completed too quickly")
+                
+                # 6. Check for technical accuracy vs speed mismatch
+                technical_terms = ['algorithm', 'database', 'framework', 'implementation', 'architecture', 
+                                 'optimization', 'scalability', 'performance', 'security', 'API']
+                tech_term_count = sum(1 for term in technical_terms if term.lower() in current_answer.lower())
+                if tech_term_count >= 3 and time_taken < 25:
+                    copy_paste_score += 25
+                    detection_reasons.append("Technical terminology used with suspiciously fast completion")
+                
+                response["thinking_time"] = thinking_time
+                response["typing_time"] = time_taken - thinking_time
+                response["copy_paste_score"] = copy_paste_score
+                response["detection_reasons"] = detection_reasons
+                
+                # Determine suspicion level
+                if copy_paste_score >= 70:
+                    response["copy_paste_suspicion"] = "HIGH"
+                elif copy_paste_score >= 40:
+                    response["copy_paste_suspicion"] = "MEDIUM"
+                else:
+                    response["copy_paste_suspicion"] = "LOW"
+                
+                response["copy_paste_suspected"] = copy_paste_score >= 50
+                
+                # Calculate typing speed for display
+                if current_answer and time_taken > 0:
+                    words = len(current_answer.split())
+                    response["typing_speed_wpm"] = (words / time_taken) * 60
+                    
             if idx < len(st.session_state.responses):
-                st.session_state.responses[idx]["answer"] = current_answer
+                st.session_state.responses[idx].update(response)
             else:
-                st.session_state.responses.append({
-                    "question": st.session_state.questions[idx],
-                    "answer": current_answer
-                })
+                st.session_state.responses.append(response)
 
         if save_only:
             _persist_current_answer()
             st.success("Saved")
         if save_next:
-            _persist_current_answer()
+            time_taken = time.time() - st.session_state.question_start_time
+            _persist_current_answer(time_taken=time_taken)
             st.session_state.current_index += 1
+            st.session_state.question_start_time = time.time()
             st.rerun()
         if finish_now:
-            _persist_current_answer()
+            time_taken = time.time() - st.session_state.question_start_time
+            _persist_current_answer(time_taken=time_taken)
             st.session_state.completed = True
             st.rerun()
     else:
@@ -446,10 +654,10 @@ if st.session_state.report:
             st.write("No logs yet.")
 
     if st.button("Start New Interview"):
-        for key in ["session_id", "start_time", "questions", "answers_key", "responses", "current_index", "completed", "report", "candidate_name"]:
-            if key in ["session_id", "start_time", "report"]:
+        for key in ["session_id", "start_time", "questions", "answers_key", "responses", "current_index", "completed", "report", "candidate_name", "debug_logs", "question_start_time", "typing_patterns", "first_keystroke_time", "paste_events", "keystroke_intervals"]:
+            if key in ["session_id", "start_time", "report", "question_start_time", "first_keystroke_time"]:
                 st.session_state[key] = None
-            elif key in ["questions", "answers_key", "responses"]:
+            elif key in ["questions", "answers_key", "responses", "debug_logs", "typing_patterns", "paste_events", "keystroke_intervals"]:
                 st.session_state[key] = []
             elif key == "current_index":
                 st.session_state[key] = 0
@@ -457,7 +665,7 @@ if st.session_state.report:
                 st.session_state[key] = ""
             else:
                 st.session_state[key] = False
-    st.rerun()
+        st.rerun()
 
 # Auto-refresh timer every second during active interview
 # (Removed aggressive immediate rerun; using st_autorefresh instead)
